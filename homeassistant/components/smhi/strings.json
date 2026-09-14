@@ -31,7 +31,7 @@
   "entity": {
     "sensor": {
       "build_up_index": {
-        "name": "Build up index"
+        "name": "hello world sensor"
       },
       "drought_code": {
         "name": "Drought code"
@@ -57,7 +57,7 @@
         }
       },
       "frozen_precipitation": {
-        "name": "Frozen precipitation"
+        "name": "freezing???"
       },
       "fwi": {
         "name": "Fire weather index"
@@ -118,7 +118,7 @@
         "name": "Potential rate of spread"
       },
       "thunder": {
-        "name": "Thunder probability"
+        "name": "Thunder probability DAT266 🤓"
       },
       "total_cloud": {
         "name": "Total cloud coverage"
