@@ -30,7 +30,7 @@ class SmhiWeatherBaseEntity(Entity):
             identifiers={(DOMAIN, f"{latitude}, {longitude}")},
             manufacturer="SMHI",
             model="v2",
-            configuration_url="http://opendata.smhi.se/apidocs/metfcst/parameters.html",
+            configuration_url="https://opendata.smhi.se/metfcst/snow1gv1/parameters",
         )
         self.update_entity_data()
 
