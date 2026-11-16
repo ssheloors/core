@@ -1,9 +1,9 @@
 """Sensor platform for SMHI integration."""
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
-from typing import override
+from typing import Any, override
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -170,14 +170,12 @@ FIRE_SENSOR_DESCRIPTIONS: tuple[SMHIFireEntityDescription, ...] = (
         ),
         device_class=SensorDeviceClass.ENUM,
         options=[*FWI_INDEX_MAP.values()],
-        entity_registry_enabled_default=False,
     ),
     SMHIFireEntityDescription(
         key="fire_weather_index",
         translation_key="fire_weather_index",
         value_fn=lambda entity: entity.coordinator.fire_current.get("fwi"),
         state_class=SensorStateClass.MEASUREMENT,
-        entity_registry_enabled_default=False,
     ),
     SMHIFireEntityDescription(
         key="initial_spread_index",
@@ -337,3 +335,33 @@ class SMHIFireSensor(SmhiFireEntity, SensorEntity):
         """Refresh the entity data."""
         if self.coordinator.data.fire_daily:
             self._attr_native_value = self.entity_description.value_fn(self)
+
+    @property
+    @override
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:
+        """Return fire risk forecast data."""
+        if self.entity_description.key != "fwiindex":
+            return None
+
+        forecast = self.coordinator.data.fire_daily
+        if not forecast:
+            return None
+
+        return {
+            "forecast": [
+                {
+                    "datetime": item["valid_time"].isoformat(),
+                    "fire_weather_index": item["fwi"],
+                    "risk": FWI_INDEX_MAP.get(str(item["fwiindex"])),
+                    "grassfire": GRASSFIRE_MAP.get(str(item["grassfire"])),
+                    "forestdry": FORESTDRY_MAP.get(str(item["forestdry"])),
+                    "initial_spread_index": item["isi"],
+                    "build_up_index": item["bui"],  # codespell:ignore bui
+                    "fine_fuel_moisture_code": item["ffmc"],
+                    "duff_moisture_code": item["dmc"],
+                    "drought_code": item["dc"],
+                    "rate_of_spread": item["rn"],
+                }
+                for item in forecast[1:]
+            ]
+        }
