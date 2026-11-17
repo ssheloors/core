@@ -3,7 +3,7 @@
 from collections.abc import Mapping
 from typing import Any, Final, override
 
-from pysmhi import SMHIForecast
+from pysmhi import SMHIFireForecast, SMHIForecast
 
 from homeassistant.components.weather import (
     ATTR_CONDITION_CLEAR_NIGHT,
@@ -52,9 +52,18 @@ from homeassistant.helpers import sun
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.util import slugify
 
-from .const import ATTR_SMHI_THUNDER_PROBABILITY, ENTITY_ID_SENSOR_FORMAT
-from .coordinator import SMHIConfigEntry
-from .entity import SmhiWeatherEntity
+from .const import (
+    ATTR_SMHI_THUNDER_PROBABILITY,
+    ENTITY_ID_SENSOR_FORMAT,
+    FIRE_WEATHER_INDEX_CATEGORIES,
+)
+from .coordinator import SMHIConfigEntry, SMHIFireDataUpdateCoordinator
+from .entity import SmhiFireEntity, SmhiWeatherEntity
+
+ATTR_FIRE_WEATHER_INDEX = "fire_weather_index"
+ATTR_FIRE_WEATHER_INDEX_CATEGORY = "fire_weather_index_category"
+ATTR_GRASSFIRE = "grassfire"
+ATTR_FOREST_DRYNESS = "forestdry"
 
 # Used to map condition from API results
 CONDITION_CLASSES: Final[dict[str, list[int]]] = {
@@ -97,7 +106,14 @@ async def async_setup_entry(
     )
     entity.entity_id = ENTITY_ID_SENSOR_FORMAT.format(slugify(config_entry.title))
 
-    async_add_entities([entity])
+    fire_entity = SmhiFire(
+        location[CONF_LOCATION][CONF_LATITUDE],
+        location[CONF_LOCATION][CONF_LONGITUDE],
+        coordinator=config_entry.runtime_data[1],
+    )
+    fire_entity.entity_id = f"weather.smhi_{slugify(config_entry.title)}_fire_risk"
+
+    async_add_entities([entity, fire_entity])
 
 
 class SmhiWeather(SmhiWeatherEntity, SingleCoordinatorWeatherEntity):
@@ -213,3 +229,101 @@ class SmhiWeather(SmhiWeatherEntity, SingleCoordinatorWeatherEntity):
             new_forecast[ATTR_FORECAST_IS_DAYTIME] = forecast["valid_time"].hour == 12
 
         return new_forecast
+
+
+class SmhiFire(SmhiFireEntity, SingleCoordinatorWeatherEntity):
+    """Class for the fire forecast."""
+
+    _attr_condition = ATTR_CONDITION_EXCEPTIONAL
+    _attr_supported_features = (
+        WeatherEntityFeature.FORECAST_DAILY | WeatherEntityFeature.FORECAST_HOURLY
+    )
+    _attr_name = "Fire risk"
+
+    def __init__(
+        self,
+        latitude: str,
+        longitude: str,
+        coordinator: SMHIFireDataUpdateCoordinator,
+    ) -> None:
+        """Initialize the fire risk entity."""
+        super().__init__(latitude, longitude, coordinator)
+        self._attr_unique_id = f"{latitude}, {longitude}-fire-risk"
+
+    @override
+    def update_entity_data(self) -> None:
+        """Refresh the current fire risk data."""
+        if fire_data := self.coordinator.data.fire_daily:
+            current = fire_data[0]
+            self._attr_native_temperature = current["fwi"]
+            self._attr_humidity = current["fwiindex"]
+            self._attr_native_wind_speed = current["isi"]
+            self._attr_wind_bearing = current["grassfire"]
+            self._attr_uv_index = current["forestdry"]
+
+    @property
+    @override
+    def extra_state_attributes(self) -> Mapping[str, Any] | None:
+        """Return the current fire risk metrics."""
+        if not self.coordinator.data.fire_daily:
+            return None
+
+        current = self.coordinator.data.fire_daily[0]
+        return {
+            ATTR_FIRE_WEATHER_INDEX: current["fwi"],
+            ATTR_FIRE_WEATHER_INDEX_CATEGORY: FIRE_WEATHER_INDEX_CATEGORIES.get(
+                current["fwiindex"]
+            ),
+            ATTR_GRASSFIRE: current["grassfire"],
+            ATTR_FOREST_DRYNESS: current["forestdry"],
+            "fire_temperature": current["temperature"],
+            "initial_spread_index": current["isi"],
+            "build_up_index": current["bui"],  # codespell:ignore bui
+            "fine_fuel_moisture_code": current["ffmc"],
+            "duff_moisture_code": current["dmc"],
+            "drought_code": current["dc"],
+            "rate_of_spread": current["rn"],
+        }
+
+    @callback
+    @override
+    def _handle_coordinator_update(self) -> None:
+        """Handle updated data from the coordinator."""
+        super()._handle_coordinator_update()
+
+    @override
+    def _async_forecast_daily(self) -> list[Forecast] | None:
+        """Return the daily fire risk forecast."""
+        return self._get_fire_forecast_data(
+            self.coordinator.data.fire_daily, daily=True
+        )
+
+    @override
+    def _async_forecast_hourly(self) -> list[Forecast] | None:
+        """Return the hourly fire risk forecast."""
+        return self._get_fire_forecast_data(
+            self.coordinator.data.fire_hourly, daily=False
+        )
+
+    def _get_fire_forecast_data(
+        self, forecast_data: list[SMHIFireForecast], *, daily: bool
+    ) -> list[Forecast] | None:
+        """Convert SMHI fire data to Home Assistant forecasts."""
+        if len(forecast_data) < 3:
+            return None
+
+        forecasts = forecast_data[1:] if daily else forecast_data
+        return [self._create_fire_forecast(forecast) for forecast in forecasts]
+
+    def _create_fire_forecast(self, forecast: SMHIFireForecast) -> Forecast:
+        """Create a Home Assistant forecast from SMHI fire data."""
+        return Forecast(
+            {
+                ATTR_FORECAST_TIME: forecast["valid_time"].isoformat(),
+                ATTR_FORECAST_CONDITION: ATTR_CONDITION_EXCEPTIONAL,
+                ATTR_FORECAST_NATIVE_TEMP: forecast["fwi"],
+                ATTR_FORECAST_NATIVE_WIND_SPEED: forecast["wind_speed"],
+                ATTR_FORECAST_WIND_BEARING: forecast["wind_direction"],
+                ATTR_FORECAST_HUMIDITY: forecast["humidity"],
+            }
+        )

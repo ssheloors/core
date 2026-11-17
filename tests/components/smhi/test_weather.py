@@ -62,6 +62,39 @@ async def test_setup_hass(
 
 
 @pytest.mark.parametrize(
+    "load_platforms",
+    [[Platform.WEATHER]],
+)
+async def test_fire_risk_forecast(
+    hass: HomeAssistant,
+    load_int: MockConfigEntry,
+) -> None:
+    """Test the fire risk entity and forecast."""
+    entity_id = "weather.smhi_test_fire_risk"
+    state = hass.states.get(entity_id)
+
+    assert state
+    assert state.state == "exceptional"
+    assert state.attributes["temperature"] == 6.6
+    assert state.attributes["fire_weather_index"] == 6.6
+    assert state.attributes["fire_weather_index_category"] == "low"
+    assert state.attributes["initial_spread_index"] == 2.6
+    assert state.attributes["grassfire"] == -1
+    assert state.attributes["forestdry"] == 3
+
+    response = await hass.services.async_call(
+        WEATHER_DOMAIN,
+        SERVICE_GET_FORECASTS,
+        {"entity_id": entity_id, "type": "daily"},
+        blocking=True,
+        return_response=True,
+    )
+
+    assert response[entity_id]["forecast"]
+    assert response[entity_id]["forecast"][0]["temperature"] == 0.2
+
+
+@pytest.mark.parametrize(
     "to_load",
     [1],
 )
